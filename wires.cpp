@@ -13,11 +13,10 @@
 #include <TVector3.h>
 #include <TMarker3DBox.h>
 #include <unordered_set>
-#include <numeric>
 #include <TH2D.h>
 
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "OCSimplifyInspection"
+//#pragma clang diagnostic push
+//#pragma ide diagnostic ignored "OCSimplifyInspection"
 
 template<class T>
 using hashset = std::unordered_set<T>;
@@ -25,10 +24,13 @@ using hashset = std::unordered_set<T>;
 template<class K, class V>
 using hashmap = std::unordered_map<K, V>;
 
+// config variables
 constexpr bool DRAW = true;
 constexpr bool FLIP = true;
 constexpr size_t CHITS = 100;
 constexpr size_t WHITS = 30000;
+
+// detector geometry
 constexpr double ytop = 866.42;
 constexpr double ymid = 662.42;
 constexpr double ybot = -358.9;
@@ -104,7 +106,7 @@ struct WireHit {
 
   friend std::ostream &operator<<(std::ostream &os, const WireHit &hit) {
     os << "channel: " << hit.channel << ", cryo: " << hit.cryo << ", tpc: " << hit.tpc << ", plane: " << hit.plane
-       << ", wire: " << hit.wire << ", peakTick: " << hit.peakTick/* << ", peakNs: " << hit.peakNs*/;
+       << ", wire: " << hit.wire << ", peakTick: " << hit.peakTick;
     return os;
   }
 };
