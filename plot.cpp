@@ -6,7 +6,7 @@
 #include <TCanvas.h>
 #include <iostream>
 
-void plot(const char *hitDumperTreeDir = ".", bool strips = true) {
+void plot(int n = -1, const char *hitDumperTreeDir = ".", bool strips = true) {
   std::string dir(hitDumperTreeDir);
   auto *c1 = new TCanvas("c1", "c1");
   auto *file = TFile::Open(dir.append("/hitdumper_tree.root").c_str());
@@ -76,9 +76,9 @@ void plot(const char *hitDumperTreeDir = ".", bool strips = true) {
   auto *hits = new TPolyMarker3D(100);
   auto *inAds = new TPolyMarker3D(100);
 
-  long len = tree->GetEntries();
-//  for (long i = 0; i < 1; ++i) {
-  for (long i = 0; i < len; ++i) {
+  long low = (n == -1) ? 0 : n;
+  long high = (n == -1) ? tree->GetEntries() : n + 1;
+  for (long i = low; i < high; ++i) {
     tree->GetEntry(i);
 
     for (int j = 0; j < ncts; ++j) {
@@ -135,4 +135,6 @@ void plot(const char *hitDumperTreeDir = ".", bool strips = true) {
   // Axes
   //auto axes = new TAxis3D();
   //axes->Draw();
+
+  std::cout << "done" << std::endl;
 }

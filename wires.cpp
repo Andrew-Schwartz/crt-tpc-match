@@ -14,6 +14,7 @@
 #include <TMarker3DBox.h>
 #include <unordered_set>
 #include <numeric>
+#include <TH2D.h>
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "OCSimplifyInspection"
@@ -21,6 +22,10 @@
 template<class T>
 using hashset = std::unordered_set<T>;
 
+template<class K, class V>
+using hashmap = std::unordered_map<K, V>;
+
+constexpr bool DRAW = true;
 constexpr bool FLIP = true;
 constexpr size_t CHITS = 100;
 constexpr size_t WHITS = 30000;
@@ -48,6 +53,10 @@ void flip(double *ys, double *zs, int len) {
   }
 }
 
+bool epsEqual(double n1, double n2, double eps = 0.01) {
+  return std::abs(n1 - n2) < eps;
+}
+
 struct Wire {
   int channel;
   int cryo, tpc, plane, wire;
@@ -59,6 +68,7 @@ struct Wire {
   }
 
   void draw() const {
+    if constexpr (!DRAW) return;
     double xs[] {x1, x2},
         ys[] {y1, y2},
         zs[] {z1, z2};
@@ -71,8 +81,8 @@ struct Wire {
 
   friend std::ostream &operator<<(std::ostream &os, const Wire &wire) {
     os << "channel: " << wire.channel << ", cryo: " << wire.cryo << ", tpc: " << wire.tpc << ", plane: "
-       << wire.plane << ", wire: " << wire.wire << ", x1: " << wire.x1 << ", y1: " << wire.y1 << ", z1: "
-       << wire.z1 << ", x2: " << wire.x2 << ", y2: " << wire.y2 << ", z2: " << wire.z2;
+       << wire.plane << ", wire: " << wire.wire << ", xt: " << wire.x1 << ", yt: " << wire.y1 << ", zt: "
+       << wire.z1 << ", xm: " << wire.x2 << ", ym: " << wire.y2 << ", zm: " << wire.z2;
     return os;
   }
 };
@@ -157,6 +167,7 @@ struct CRTStrip {
   double x2, y2, z2;
 
   void draw() const {
+    if constexpr (!DRAW) return;
     double xs[] {x1, x2},
         ys[] {y1, y2},
         zs[] {z1, z2};
@@ -178,66 +189,106 @@ struct CRTStrip {
   }
 
   friend std::ostream &operator<<(std::ostream &os, const CRTStrip &strip) {
-    os << "id: " << strip.id << ", x1: " << strip.x1 << ", y1: " << strip.y1 << ", z1: " << strip.z1 << ", x2: "
-       << strip.x2 << ", y2: " << strip.y2 << ", z2: " << strip.z2;
+    os << "id: " << strip.id << ", xt: " << strip.x1 << ", yt: " << strip.y1 << ", zt: " << strip.z1 << ", xm: "
+       << strip.x2 << ", ym: " << strip.y2 << ", zm: " << strip.z2;
     return os;
   }
 };
 
 struct CRTTrack {
   // top
-  double x1, y1, z1;
+  double xt, yt, zt;
   // middle
-  double x2 {}, y2 {}, z2 {};
+  double xm, ym, zm;
   // bottom
-  double x3 {}, y3 {}, z3 {};
+  double xb, yb, zb;
 
-  CRTTrack(double x1, double y1, double z1) : x1(x1), y1(y1), z1(z1) {}
+  CRTTrack(double xt, double yt, double zt,
+           double xm, double ym, double zm,
+           double xb, double yb, double zb
+  ) : xt(xt), yt(yt), zt(zt), xm(xm), ym(ym), zm(zm), xb(xb), yb(yb), zb(zb) {}
 
-  CRTTrack(double x1,
-           double y1,
-           double z1,
-           double x2,
-           double y2,
-           double z2
-  ) : x1(x1), y1(y1), z1(z1), x2(x2), y2(y2), z2(z2) {}
+  CRTTrack(CRTTrack top, double xb, double yb, double zb)
+      : xt(top.xt), yt(top.yt), zt(top.zt), xm(top.xm), ym(top.ym), zm(top.zm), xb(xb), yb(yb), zb(zb) {}
 
-  CRTTrack(double x1,
-           double y1,
-           double z1,
-           double x2,
-           double y2,
-           double z2,
-           double x3,
-           double y3,
-           double z3
-  ) : x1(x1), y1(y1), z1(z1), x2(x2), y2(y2), z2(z2), x3(x3), y3(y3), z3(z3) {}
+  [[nodiscard]] std::optional<TVector3> top() const {
+    if (xt == 0 && yt == 0 && zt == 0) {
+      return std::nullopt;
+    } else {
+      return TVector3(xt, yt, zt);
+    }
+  }
 
-  CRTTrack(CRTTrack top, double x3, double y3, double z3)
-      : x1(top.x1), y1(top.y1), z1(top.z1), x2(top.x2), y2(top.y2), z2(top.z2), x3(x3), y3(y3), z3(z3) {}
+  [[nodiscard]] std::optional<TVector3> mid() const {
+    if (xm == 0 && ym == 0 && zm == 0) {
+      return std::nullopt;
+    } else {
+      return TVector3(xm, ym, zm);
+    }
+  }
+
+  [[nodiscard]] std::optional<TVector3> bot() const {
+    if (xb == 0 && yb == 0 && zb == 0) {
+      return std::nullopt;
+    } else {
+      return TVector3(xb, yb, zb);
+    }
+  }
+
+  [[nodiscard]] int numPts() const {
+    int n = 0;
+    if (top()) ++n;
+    if (mid()) ++n;
+    if (bot()) ++n;
+    return n;
+  }
+
+  static CRTTrack topMid(double xt, double yt, double zt,
+                         double xm, double ym, double zm) {
+    return CRTTrack(xt, yt, zt, xm, ym, zm, 0, 0, 0);
+  }
+
+  static CRTTrack topBot(double xt, double yt, double zt,
+                         double xb, double yb, double zb) {
+    return CRTTrack(xt, yt, zt, 0, 0, 0, xb, yb, zb);
+  }
+
+  static CRTTrack midBot(double xm, double ym, double zm,
+                         double xb, double yb, double zb) {
+    return CRTTrack(0, 0, 0, xm, ym, zm, xb, yb, zb);
+  }
 
   void draw(Color_t color = kBlack) const {
+    if constexpr (!DRAW) return;
     TPolyLine3D *line;
-    if (x3 == 0 && y3 == 0 && z3 == 0) {
-      double xs[] {x1, x2},
-          ys[] {y1, y2},
-          zs[] {z1, z2};
+    if (xb == 0 && yb == 0 && zb == 0) {
+      double xs[] {xt, xm},
+          ys[] {yt, ym},
+          zs[] {zt, zm};
       if constexpr (FLIP) {
         flip(ys, zs, 2);
       }
       line = new TPolyLine3D(2, xs, ys, zs);
-    } else if (x2 == 0 && y2 == 0 && z2 == 0) {
-      double xs[] {x1, x3},
-          ys[] {y1, y3},
-          zs[] {z1, z3};
+    } else if (xm == 0 && ym == 0 && zm == 0) {
+      double xs[] {xt, xb},
+          ys[] {yt, yb},
+          zs[] {zt, zb};
+      if constexpr (FLIP) {
+        flip(ys, zs, 2);
+      }
+      line = new TPolyLine3D(2, xs, ys, zs);
+    } else if (xt == 0 && yt == 0 && zt == 0) {
+      double xs[] {xm, xb},
+          ys[] {ym, yb},
+          zs[] {zm, zb};
       if constexpr (FLIP) {
         flip(ys, zs, 2);
       }
       line = new TPolyLine3D(2, xs, ys, zs);
     } else {
-      double xs[] {x1, x2, x3},
-          ys[] {y1, y2, y3},
-          zs[] {z1, z2, z3};
+      double xs[] {xt, xm, xb},
+          ys[] {yt, ym, yb},
+          zs[] {zt, zm, zb};
       if constexpr (FLIP) {
         flip(ys, zs, 3);
       }
@@ -249,8 +300,8 @@ struct CRTTrack {
 
   // alg from https://rosettacode.org/wiki/Find_the_intersection_of_a_line_with_a_plane
   [[nodiscard]] TVector3 projectY(double y3) const {
-    TVector3 trackDir(x1 - x2, y1 - y2, z1 - z2),
-        trackPt(x2, y2, z2),
+    TVector3 trackDir(xt - xm, yt - ym, zt - zm),
+        trackPt(xm, ym, zm),
         planeNorm(0.0, 1.0, 0.0),
         planePt(0.0, y3, 0.0);
     TVector3 diff = trackPt - planePt;
@@ -260,36 +311,86 @@ struct CRTTrack {
     return trackPt - trackDir * prod3;
   }
 
-  [[nodiscard]] bool sameStart(const CRTTrack &other) const {
-    return x1 == other.x1 &&
-           y1 == other.y1 &&
-           z1 == other.z1 &&
-           x2 == other.x2 &&
-           y2 == other.y2 &&
-           z2 == other.z2;
+  [[nodiscard]] bool topEq(const CRTTrack &other) const {
+    return epsEqual(xt, other.xt) &&
+           epsEqual(yt, other.yt) &&
+           epsEqual(zt, other.zt);
+  }
+
+  [[nodiscard]] bool midEq(const CRTTrack &other) const {
+    return epsEqual(xm, other.xm) &&
+           epsEqual(ym, other.ym) &&
+           epsEqual(zm, other.zm);
+  }
+
+  [[nodiscard]] bool botEq(const CRTTrack &other) const {
+    // ignore x because the hit doesn't tell us x
+    return epsEqual(yb, other.yb) &&
+           epsEqual(zb, other.zb);
+  }
+
+  [[nodiscard]] TVector3 topmostPt() const {
+    return (xt == 0 && yt == 0 && zt == 0)
+           ? TVector3(xm, ym, zm)
+           : TVector3(xt, yt, zt);
   }
 
   friend std::ostream &operator<<(std::ostream &os, const CRTTrack &track) {
-    os << "x1: " << track.x1 << ", y1: " << track.y1 << ", z1: " << track.z1 << ", x2: " << track.x2 << ", y2: "
-       << track.y2 << ", z2: " << track.z2 << ", x3: " << track.x3 << ", y3: " << track.y3 << ", z3: " << track.z3;
+    os << "xt: " << track.xt << ", yt: " << track.yt << ", zt: " << track.zt << ", xm: " << track.xm << ", ym: "
+       << track.ym << ", zm: " << track.zm << ", xb: " << track.xb << ", yb: " << track.yb << ", zb: " << track.zb;
     return os;
+  }
+
+  [[nodiscard]] bool containsPt(const CRTHit &hit) const {
+    return (epsEqual(hit.x, xt) && epsEqual(hit.y, yt) && epsEqual(hit.z, zt)) ||
+           (epsEqual(hit.x, xm) && epsEqual(hit.y, ym) && epsEqual(hit.z, zm)) ||
+           (epsEqual(hit.x, xb) && epsEqual(hit.y, yb) && epsEqual(hit.z, zb));
+  }
+
+  bool operator==(const CRTTrack &rhs) const {
+    return xt == rhs.xt &&
+           yt == rhs.yt &&
+           zt == rhs.zt &&
+           xm == rhs.xm &&
+           ym == rhs.ym &&
+           zm == rhs.zm &&
+           xb == rhs.xb &&
+           yb == rhs.yb &&
+           zb == rhs.zb;
+  }
+
+  bool operator!=(const CRTTrack &rhs) const {
+    return !(rhs == *this);
   }
 };
 
 namespace std {
   template<>
   struct hash<CRTTrack> {
-    std::size_t operator()(CRTTrack const &track) const noexcept {
+    std::size_t operator()(const CRTTrack &track) const noexcept {
       std::size_t ret = 0;
-      hash_combine(ret, track.x1);
-      hash_combine(ret, track.y1);
-      hash_combine(ret, track.z1);
-      hash_combine(ret, track.x2);
-      hash_combine(ret, track.y2);
-      hash_combine(ret, track.z2);
-      hash_combine(ret, track.x3);
-      hash_combine(ret, track.y3);
-      hash_combine(ret, track.z3);
+      hash_combine(ret, track.xt);
+      hash_combine(ret, track.yt);
+      hash_combine(ret, track.zt);
+      hash_combine(ret, track.xm);
+      hash_combine(ret, track.ym);
+      hash_combine(ret, track.zm);
+      hash_combine(ret, track.xb);
+      hash_combine(ret, track.yb);
+      hash_combine(ret, track.zb);
+      return ret;
+    }
+  };
+}
+
+namespace std {
+  template<>
+  struct hash<TVector3> {
+    std::size_t operator()(const TVector3 &vec) const noexcept {
+      std::size_t ret = 0;
+      hash_combine(ret, vec.X());
+      hash_combine(ret, vec.Y());
+      hash_combine(ret, vec.Z());
       return ret;
     }
   };
@@ -307,18 +408,24 @@ tpcMatch(const std::vector<Wire> &wires, const std::vector<WireHit> &tcpPlane, s
 
 void addPoint(TPolyMarker3D *pts, const TVector3 &vector);
 
+double mean(const std::vector<double> &data);
+
 TVector3 mean(const std::vector<TVector3> &pts);
+
+double stddev(const std::vector<double> &data, const std::optional<double> &omean);
 
 double stddev(const std::vector<TVector3> &pts, const std::optional<TVector3> &omean);
 
 std::string vecToStr(const TVector3 &vec);
 
-void wires(int n = -1) {
+void wires(bool allTracks, int n) {
   auto *c1 = new TCanvas("c1", "c1"); // to make root not print that this is created
   auto *file = TFile::Open("hitdumper_tree.root");
   auto *hitdumper = (TDirectoryFile *) file->Get("hitdumper");
   hitdumper->cd();
   auto *tree = (TTree *) hitdumper->Get("hitdumpertree");
+  auto *matchedCRTHits = new TH1D("num matches", "num matches", 20, 0, 20);
+  matchedCRTHits->SetStats(false);
 
   std::vector<Wire> wires = parse_wires();
   std::vector<CRTStrip> strips = parse_strips();
@@ -344,6 +451,9 @@ void wires(int n = -1) {
   tree->SetBranchAddress("chit_time", &t);
   tree->SetBranchAddress("nchits", &nchits);
 
+  int crtHitTotal = 0;
+  int crtHitMatches = 0;
+
   // draw hits
   auto *chitMarker = new TPolyMarker3D(CHITS);
   long low = (n == -1) ? 0 : n;
@@ -354,6 +464,7 @@ void wires(int n = -1) {
       std::cout << "TOO FEW MAX CRT HITS, only " << CHITS << " of " << nchits << " hits are being used" << std::endl;
       nchits = CHITS;
     }
+    crtHitTotal += nchits;
     if (nwhits > WHITS) {
       std::cout << "TOO FEW MAX WIRE HITS, only " << WHITS << " of " << nwhits << " hits are being used" << std::endl;
       nwhits = WHITS;
@@ -389,114 +500,74 @@ void wires(int n = -1) {
       }*/
     }
 
-//    std::vector<CRTTrack> tracks, maybeTracks;
-//    hashset<CRTHit> usedHits;
-//    if (!top.empty()) {
-//      hashset<CRTHit> tmpUsed;
-//      if (!mid.empty()) {
-//        for (const auto &thit : top) {
-//          // TODO: instead of just doing closest hit, should do (closest?) pair where the time and dist
-//          //  between the points are the same (velocity)
-//          std::sort(mid.begin(), mid.end(), [&](const CRTHit &a, const CRTHit &b) {
-//            return std::hypot(a.x - thit.x, a.z - thit.z) < std::hypot(b.x - thit.x, b.z - thit.z);
-//          });
-//          double dist = std::hypot(thit.x - mid[0].x, thit.z - mid[0].z);
-//          std::cout << "dist = " << dist << std::endl;
-//
-//          if (dist < 5) {
-//            CRTTrack track(thit.x, thit.y, thit.z, mid[0].x, mid[0].y, mid[0].z);
-//            tracks.push_back(track);
-//            tmpUsed.insert({thit, mid[0]});
-//          }
-//        }
-//      } else { // top !empty, mid empty
-//        if (!bot.empty()) {
-//          for (const auto &thit : top) {
-//            // TODO: same as above
-//            std::sort(bot.begin(), bot.end(), [&](const CRTHit &a, const CRTHit &b) {
-//              return std::hypot(a.x - thit.x, a.z - thit.z) < std::hypot(b.x - thit.x, b.z - thit.z);
-//            });
-//            double dist = std::hypot(thit.x - bot[0].x, thit.z - bot[0].z);
-//            std::cout << "dist = " << dist << std::endl;
-//
-//            if (dist < 30) {
-//              CRTTrack track(thit.x, thit.y, thit.z, bot[0].x, bot[0].y, bot[0].z);
-//              tracks.push_back(track);
-//              tmpUsed.insert({thit, bot[0]});
-//            }
-//          }
-//        }
-//      }
-//    } else { // top empty
-//      if (!bot.empty()) {
-//        for (const auto &thit : top) {
-//          // TODO: same as above
-//          std::sort(bot.begin(), bot.end(), [&](const CRTHit &a, const CRTHit &b) {
-//            return std::hypot(a.x - thit.x, a.z - thit.z) < std::hypot(b.x - thit.x, b.z - thit.z);
-//          });
-//          double dist = std::hypot(thit.x - bot[0].x, thit.z - bot[0].z);
-//          std::cout << "dist = " << dist << std::endl;
-//
-//          if (dist < 30) {
-//            CRTTrack track(thit.x, thit.y, thit.z, bot[0].x, bot[0].y, bot[0].z);
-//            tracks.push_back(track);
-//            tmpUsed.insert({thit, bot[0]});
-//          }
-//        }
-//      }
-//    }
-
     std::vector<CRTTrack> tracks;
-    if (!mid.empty()) {
-      for (const auto &thit : top) {
-        std::sort(mid.begin(), mid.end(), [&](const CRTHit &a, const CRTHit &b) {
-          return std::hypot(a.x - thit.x, a.z - thit.z) < std::hypot(b.x - thit.x, b.z - thit.z);
-        });
-        double dist = std::hypot(thit.x - mid[0].x, thit.z - mid[0].z);
-        std::cout << "dist = " << dist << std::endl;
-
-        CRTTrack track(thit.x, thit.y, thit.z, mid[0].x, mid[0].y, mid[0].z);
-        tracks.push_back(track);
+    for (const auto &thit : top) {
+      for (const auto &mhit : mid) {
+        tracks.push_back(CRTTrack::topMid(thit.x, thit.y, thit.z, mhit.x, mhit.y, mhit.z));
       }
-      auto *pts = new TPolyMarker3D();
-      if (!bot.empty()) {
-        for (int j = tracks.size(); j > 0; --j) {
-          auto track = tracks[0];
-          tracks.erase(tracks.begin());
-          for (const auto &bhit : bot) {
-            TVector3 proj = track.projectY(bhit.y);
-            addPoint(pts, proj);
-            TVector3 bvec(bhit.x, bhit.y, bhit.z);
-            double dist = (bvec - proj).Mag();
-            std::cout << "proj dist = " << dist << std::endl;
-            if (dist < 150) { // TODO tune this a bit
-              tracks.emplace_back(track, proj.x(), bhit.y, bhit.z);
-            }
+//        std::sort(mid.begin(), mid.end(), [&](const CRTHit &a, const CRTHit &b) {
+//          return std::hypot(a.x - thit.x, a.z - thit.z) < std::hypot(b.x - thit.x, b.z - thit.z);
+//        });
+//        double dist = std::hypot(thit.x - mid[0].x, thit.z - mid[0].z);
+//        std::cout << "dist = " << dist << std::endl;
+//
+//        CRTTrack track(thit.x, thit.y, thit.z, mid[0].x, mid[0].y, mid[0].z);
+//        tracks.push_back(track);
+    }
+    auto *projPts = new TPolyMarker3D();
+    if (!bot.empty()) {
+      for (int j = tracks.size(); j > 0; --j) {
+        auto track = tracks[0];
+        tracks.erase(tracks.begin());
+        for (const auto &bhit : bot) {
+          TVector3 proj = track.projectY(bhit.y);
+          TVector3 bvec(bhit.x, bhit.y, bhit.z);
+          double dist = (bvec - proj).Mag();
+          std::cout << "proj dist = " << dist << std::endl;
+          bool sameSide = std::signbit(proj.x()) == std::signbit(bhit.x);
+          if (sameSide && dist < 600) { // TODO tune this a bit (maybe instead check that proj is inside CRT?)
+            addPoint(projPts, TVector3(proj.x(), bhit.y, bhit.z));
+            tracks.emplace_back(track, proj.x(), bhit.y, bhit.z);
           }
         }
       }
-      pts->SetMarkerStyle(kFullDotMedium);
-      pts->SetMarkerColor(kGreen);
-      pts->Draw();
+    }
+    projPts->SetMarkerStyle(kFullDotMedium);
+    projPts->SetMarkerColor(kGreen);
+    if constexpr (DRAW) {
+      projPts->Draw();
+    }
 
-//      for (const auto &track : tracks) {
-//        track.draw();
-//      }
-    }/* else {
-      auto *pts = new TPolyMarker3D();
-      if (!bot.empty()) {
-        for (const auto &thit : top) {
-          std::sort(bot.begin(), bot.end(), [&](const CRTHit &a, const CRTHit &b) {
-            return std::hypot(a.x - thit.x, a.z - thit.z) < std::hypot(b.x - thit.x, b.z - thit.z);
-          });
-          double dist = std::hypot(thit.x - bot[0].x, thit.z - bot[0].z);
-          std::cout << "dist (b hit) = " << dist << std::endl;
-          tracks.emplace_back(thit.x, thit.y, thit.z);
+    unsigned long firstIncomplete = tracks.size();
+    for (const auto &bhit : bot) {
+      for (const auto &thit : top) {
+        tracks.push_back(CRTTrack::topBot(thit.x, thit.y, thit.z, bhit.x, bhit.y, bhit.z));
+      }
+      for (const auto &mhit : mid) {
+        tracks.push_back(CRTTrack::midBot(mhit.x, mhit.y, mhit.z, bhit.x, bhit.y, bhit.z));
+      }
+    }
 
-//          for (const auto &)
+    if (firstIncomplete != 0) {
+      for (unsigned long j = tracks.size() - 1; j >= firstIncomplete; --j) {
+        auto incomp = tracks[j];
+        for (unsigned long k = 0; k < firstIncomplete; ++k) {
+          auto comp = tracks[k];
+          if (incomp.botEq(comp) && (incomp.topEq(comp) || incomp.midEq(comp))) {
+            tracks.erase(tracks.begin() + j);
+            break;
+          }
         }
       }
-    }*/
+    }
+    std::cout << "#tracks = " << tracks.size() << std::endl;
+    if (tracks.size() > 200) continue;
+
+    if (allTracks) {
+      for (const auto &track : tracks) {
+        track.draw();
+      }
+    }
 
     // Sort by time, with the vertical planes always first
     std::sort(whits.begin(), whits.end(), [](const WireHit &a, const WireHit &b) {
@@ -523,76 +594,216 @@ void wires(int n = -1) {
     std::cout << "num intersects = " << intersectMarks->Size() << std::endl;
     intersectMarks->SetMarkerStyle(kFullDotMedium);
     intersectMarks->SetMarkerColor(kRed);
-    intersectMarks->Draw();
+    if constexpr (DRAW) {
+      intersectMarks->Draw();
+    }
 
-//    auto *trace = new TPolyMarker3D();
-    std::vector<int> scores;
+    auto *trace = new TPolyMarker3D();
+//    std::vector<double> scores;
+    hashmap<CRTTrack, double> scores;
+//    int idx = 0;
     for (const auto &track : tracks) {
-      int score = 0;
+//      if (idx++ != 5) continue;
+//      track.draw();
 
-      double slope = (track.z2 - track.z3) / (track.y2 - track.y3);
+      double score = 0;
+      int tot = 0;
+
+      hashset<TVector3> usedIntersects;
+      auto topmost = track.topmostPt();
+      double slopeZ = (topmost.z() - track.zb) / (topmost.y() - track.yb);
+      double slopeX = (topmost.x() - track.xb) / (topmost.y() - track.yb);
       int delta = 1;
-      double planeX = (track.x1 > 0) ? 201.8 : -201.8;
       for (
-          TVector3 pt {planeX, track.y2, track.z2};
+          TVector3 pt = track.topmostPt();
           pt.Y() > -200; // -200 is the bottom of tcp plane
-          pt = TVector3(pt.X(), pt.Y() - delta, pt.Z() - slope * delta)
+//          pt = TVector3(pt.X(), pt.Y() - delta, pt.Z() - slopeZ * delta)
+          pt -= TVector3(slopeX * delta, delta, slopeZ * delta)
           ) {
         if (pt.Y() > 200) continue; // 200 is top of tcp plane
+//          double y = pt.Y(),
+//              z = pt.Z();
+//          flip(&y, &z, 1);
+//          trace->SetNextPoint(pt.X(), y, z);
 
         for (const auto &intersect : intersects) {
-          double mag = (pt - intersect).Mag();
-          int maxDist = 10;
-          if (mag < maxDist) {
-//            double y = intersect.Y(), z = intersect.Z();
+          if (std::signbit(intersect.X()) != std::signbit(pt.X()))
+            continue; // ensure intersect and track are at same wire plane
+          ++tot;
+          auto projected = pt;
+          projected.SetX(intersect.x());
+          double mag = (projected - intersect).Mag();
+          int maxDist = 5;
+//            double y = intersect.Y(),
+//                z = intersect.Z();
 //            flip(&y, &z, 1);
 //            trace->SetNextPoint(intersect.X(), y, z);
+          if (mag < maxDist) {
             ++score;
+            usedIntersects.insert(intersect);
           }
         }
       }
 
+      if (tot == 0) {
+        score = 0;
+      } else {
+        score /= tot;
+      }
       std::cout << "score = " << score << std::endl;
-      scores.push_back(score);
+//      scores.push_back(score);
+      scores.emplace(track, score);
     }
-//    trace->SetMarkerStyle(kFullDotMedium);
-//    trace->SetMarkerColor(kGreen + 2);
-//    std::cout << trace->Size() << std::endl;
-//    trace->Draw();
+    trace->SetMarkerStyle(kFullDotMedium);
+    trace->SetMarkerColor(kGreen + 2);
+    std::cout << "trace size: " << trace->Size() << std::endl;
+    if constexpr (DRAW) {
+      trace->Draw();
+    }
 
-    std::vector<int> bounds;
-    bounds.push_back(0);
-    for (int j = 1; j < tracks.size(); ++j) {
-      if (!tracks[j - 1].sameStart(tracks[j])) {
-        bounds.push_back(j);
+//    std::vector<int> bounds;
+//    bounds.push_back(0);
+//    for (int j = 1; j < tracks.size(); ++j) {
+//      CRTTrack &prev = tracks[j - 1];
+//      CRTTrack &curr = tracks[j];
+//      if (!prev.midEq(curr)/* && !prev.topEq(curr) && !prev.botEq(curr)*/) {
+//        bounds.push_back(j);
+//      }
+//    }
+//    bounds.push_back(tracks.size());
+//
+//    std::cout << "bounds = [";
+//    for (int bound : bounds) {
+//      std::cout << bound << ",";
+//    }
+//    std::cout << "]" << std::endl;
+
+    hashmap<CRTTrack, std::vector<TVector3>> trackHits;
+    hashmap<TVector3, std::vector<CRTTrack>> hitTracks;
+    for (const CRTTrack track : tracks) {
+      trackHits.emplace(track, std::vector<TVector3>());
+      std::optional<TVector3> top = track.top();
+      if (top) {
+        trackHits[track].push_back(*top);
+        if (hitTracks.find(*top) == hitTracks.end()) { // not in map
+          hitTracks.insert({*top, std::vector<CRTTrack>()});
+        }
+        hitTracks[*top].push_back(track);
+      }
+      std::optional<TVector3> mid = track.mid();
+      if (mid) {
+        trackHits[track].push_back(*mid);
+        if (hitTracks.find(*mid) == hitTracks.end()) { // not in map
+          hitTracks.insert({*mid, std::vector<CRTTrack>()});
+        }
+        hitTracks[*mid].push_back(track);
+      }
+      std::optional<TVector3> bot = track.bot();
+      if (bot) {
+        trackHits[track].push_back(*bot);
+        if (hitTracks.find(*bot) == hitTracks.end()) { // not in map
+          hitTracks.insert({*bot, std::vector<CRTTrack>()});
+        }
+        hitTracks[*bot].push_back(track);
       }
     }
-    bounds.push_back(tracks.size());
-    std::cout << "bounds = [";
-    for (int bound : bounds) {
-      std::cout << bound << ",";
-    }
-    std::cout << "]" << std::endl;
-    for (int b = 0; b < bounds.size() - 1; ++b) {
+
+//    std::vector<CRTTrack> matches;
+//    for (int b = 0; b < bounds.size() - 1; ++b) {
+//      int maxIdx;
+//      double maxScore = -1;
+//      for (int j = bounds[b]; j < bounds[b + 1]; ++j) {
+//        double score = scores[j];
+//        if (score >= maxScore) {
+//          maxScore = score;
+//          maxIdx = j;
+//        }
+//      }
+//      if (maxScore > 0.0001) {
+//        matches.push_back(tracks[maxIdx]);
+//        tracks[maxIdx].draw();
+//        std::cout << "maxIdx = " << maxIdx
+//                  << ", score = " << maxScore
+//                  << ", track = " << tracks[maxIdx] << std::endl;
+//      }
+//    }
+
+    std::vector<CRTTrack> matches;
+    for (const auto &hitTrack : hitTracks) {
+      const auto&[hit, htracks] = hitTrack;
+      std::cout << "vecToStr(hit) = " << vecToStr(hit) << std::endl;
       int maxIdx;
-      int maxScore = std::numeric_limits<int>::min();
-      for (int j = bounds[b]; j < bounds[b + 1]; ++j) {
-        int score = scores[j];
+      double maxScore = -1;
+      for (int j = 0; j < htracks.size(); ++j) {
+        double score = scores[htracks[j]];
+        std::cout << "htracks[j]: score = " << score << ",  = " << htracks[j] << std::endl;
         if (score >= maxScore) {
           maxScore = score;
           maxIdx = j;
         }
       }
-      tracks[maxIdx].draw(kGreen + 4);
-      std::cout << "maxIdx = " << maxIdx
-                << ", track = " << tracks[maxIdx] << std::endl;
+      if (maxScore > 0.00001) {
+        auto newTrack = htracks[maxIdx];
+        std::vector<int> oldTrackIdxs;
+        for (int j = 0; j < matches.size(); ++j) {
+          auto track = matches[j];
+          if (track.topEq(newTrack) || track.midEq(newTrack) || track.botEq(newTrack)) {
+            oldTrackIdxs.push_back(j);
+          }
+        }
+        if (!oldTrackIdxs.empty()) { // if new track shares point with any track already in matches, only keep the higher scored one
+          std::cout << "NOT NEW: " << oldTrackIdxs.size() << " overlaps!" << std::endl;
+          bool newBest = true;
+          for (unsigned long j = oldTrackIdxs.size() - 1; j > 0; --j) {
+            int oldTrackIdx = oldTrackIdxs[j];
+            auto oldTrack = matches[oldTrackIdx];
+            double oldScore = scores[oldTrack];
+            double newScore = scores[newTrack];
+            if (newScore < oldScore) {
+              newBest = false;
+            } else {
+              std::cout << "REMOVING: " << oldTrackIdx << std::endl;
+              matches.erase(matches.begin() + oldTrackIdx);
+            }
+          }
+          if (newBest) { // erase oldTrack, put in newTrack
+            std::cout << "UPDATING " << std::endl;
+            matches.push_back(newTrack);
+          }
+        } else {
+          std::cout << "NEW" << std::endl;
+          matches.push_back(newTrack);
+        }
+      }
     }
+    std::cout << "matches.size() = " << matches.size() << std::endl;
+    for (const auto &match : matches) {
+      match.draw();
+    }
+
+    int nmatch = 0;
+    for (const auto &chit : chits) {
+      for (const auto &match : matches) {
+        if (match.containsPt(chit)) {
+          ++nmatch;
+        }
+      }
+    }
+    crtHitMatches += nmatch;
+    matchedCRTHits->Fill(nmatch);
+//    matchedCRTHits->AddBinContent(nmatch);
 
     std::cout << std::endl;
   }
   chitMarker->SetMarkerStyle(kFullDotMedium);
   chitMarker->SetMarkerColor(kBlue);
-  chitMarker->Draw();
+  if constexpr (DRAW) {
+    chitMarker->Draw();
+  }
+
+  std::cout << "crtHitTotal = " << crtHitTotal << std::endl;
+  std::cout << "crtHitMatches = " << crtHitMatches << std::endl;
+  std::cout << "real% = " << ((double) crtHitMatches) / (crtHitTotal) * 100.0 << std::endl;
 
 //   draw wires
   for (int i = 0; i < wires.size(); i += 50) {
@@ -647,26 +858,6 @@ tpcMatch(const std::vector<Wire> &wires, const std::vector<WireHit> &tcpPlane, s
       }
     }
   }
-//  TVector3 center = mean(intersects);
-//  double dist = stddev(intersects, std::optional(center));
-//
-//  std::cout << "center = " << vecToStr(center)
-//            << ", dist = " << dist
-//            << std::endl;
-//
-//  double pt[] {center.X(), center.Y(), center.Z()};
-//  flip(&pt[1], &pt[2], 1);
-//  auto pts = new TPolyMarker3D(1, pt);
-//  pts->SetMarkerColor(kGreen);
-//  pts->SetMarkerStyle(kFullDotLarge);
-//  pts->Draw();
-//  double xs[] {center.X(), center.X(), center.X(), center.X(), center.X()},
-//      ys[] {center.Y() + dist, center.Y(), center.Y() - dist, center.Y(), center.Y() + dist},
-//      zs[] {center.Z(), center.Z() + dist, center.Z(), center.Z() - dist, center.Z()};
-//  flip(ys, zs, 5);
-//  auto bound = new TPolyLine3D(5, xs, ys, zs);
-//  bound->SetLineColor(kGreen);
-//  bound->Draw();
 }
 
 std::optional<TVector3> intersection(Wire plane2, Wire plane1, Wire plane0) {
@@ -688,7 +879,7 @@ std::optional<TVector3> intersection(Wire plane2, Wire plane1, Wire plane0) {
   // intersection of wire 1 and wire 0
   double z = (m1 * (plane1.z1 + plane0.z1) + plane0.y1 - plane1.y1) / (2 * m1);
 
-//  if (std::abs(z - plane2.z1) > 1) {
+//  if (std::abs(z - plane2.zt) > 1) {
 //    return std::optional<TVector3>();
 //  }
 
@@ -699,7 +890,7 @@ std::optional<TVector3> intersection(Wire plane2, Wire plane1, Wire plane0) {
   double y = m1 * (z - plane1.z1) + plane1.y1;
 
   // how different are the Z values??
-//  double p[] {x, y, plane2.z1};
+//  double p[] {x, y, plane2.zt};
 //  flip(&p[1], &p[2], 1);
 //  auto *pt = new TPolyMarker3D(1, p);
 //  pt->SetMarkerColor(kGreen);
@@ -817,12 +1008,19 @@ TVector3 mean(const std::vector<TVector3> &pts) {
   return sum * (1.0 / pts.size());
 }
 
+double mean(const std::vector<double> &data) {
+  auto sum = data[0];
+  for (int i = 1; i < data.size(); ++i) {
+    sum += data[i];
+  }
+  return sum * (1.0 / data.size());
+}
+
 double stddev(const std::vector<TVector3> &pts, const std::optional<TVector3> &omean = std::nullopt) {
   TVector3 sum;
   auto avg = omean ? *omean : mean(pts);
   for (const auto &pt : pts) {
     const TVector3 &diff = pt - avg;
-//    std::cout << "mag = " << diff.Mag() << std::endl;
     sum += TVector3(
         std::pow(diff.X(), 2),
         std::pow(diff.Y(), 2),
@@ -831,11 +1029,16 @@ double stddev(const std::vector<TVector3> &pts, const std::optional<TVector3> &o
   }
   sum *= 1.0 / pts.size();
   return sum.Mag();
-//  double x = std::sqrt(sum.X());
-//  double y = std::sqrt(sum.Y());
-//  double z = std::sqrt(sum.Z());
-//  let stdev =
-//  return TVector3()
+}
+
+double stddev(const std::vector<double> &data, const std::optional<double> &omean) {
+  double sum;
+  auto avg = omean ? *omean : mean(data);
+  for (const auto &datum : data) {
+    sum += std::pow(datum - avg, 2);
+  }
+  sum /= data.size();
+  return std::sqrt(sum);
 }
 
 #pragma clang diagnostic pop

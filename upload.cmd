@@ -1,0 +1,1 @@
+wsl scp wires.cpp plot.cpp aschwart@sbndgpvm02.fnal.gov:/sbnd/app/users/aschwart/wkdir
