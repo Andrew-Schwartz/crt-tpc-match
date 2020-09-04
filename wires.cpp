@@ -45,6 +45,7 @@ bool near_bot(double y, double eps = 0.1) {
   return std::abs(y - ybot) < eps;
 }
 
+/// rotate coordinates so that display in ROOT has Y as vertical
 void flip(double *ys, double *zs, int len) {
   for (int i = 0; i < len; ++i) {
     double temp = ys[i];
@@ -62,10 +63,6 @@ struct Wire {
   int cryo, tpc, plane, wire;
   double x1, y1, z1;
   double x2, y2, z2;
-
-  [[nodiscard]] double len() const {
-    return std::hypot(x2 - x1, y2 - y1, z2 - z1);
-  }
 
   void draw() const {
     if constexpr (!DRAW) return;
@@ -112,6 +109,7 @@ struct WireHit {
   }
 };
 
+/// from https://stackoverflow.com/questions/2590677/how-do-i-combine-hash-values-in-c0x#2595226
 template<class T>
 inline void hash_combine(std::size_t &s, const T &v) {
   std::hash<T> h;
@@ -195,6 +193,8 @@ struct CRTStrip {
   }
 };
 
+/// reconstructed CRTTrack, will always have at least two points but handles any pair of two,
+/// including uncertainty in xb due to the single plane of strips on bottom
 struct CRTTrack {
   // top
   double xt, yt, zt;
@@ -313,20 +313,20 @@ struct CRTTrack {
 
   [[nodiscard]] bool topEq(const CRTTrack &other) const {
     return epsEqual(xt, other.xt) &&
-           epsEqual(yt, other.yt) &&
-           epsEqual(zt, other.zt);
+        epsEqual(yt, other.yt) &&
+        epsEqual(zt, other.zt);
   }
 
   [[nodiscard]] bool midEq(const CRTTrack &other) const {
     return epsEqual(xm, other.xm) &&
-           epsEqual(ym, other.ym) &&
-           epsEqual(zm, other.zm);
+        epsEqual(ym, other.ym) &&
+        epsEqual(zm, other.zm);
   }
 
   [[nodiscard]] bool botEq(const CRTTrack &other) const {
     // ignore x because the hit doesn't tell us x
     return epsEqual(yb, other.yb) &&
-           epsEqual(zb, other.zb);
+        epsEqual(zb, other.zb);
   }
 
   [[nodiscard]] TVector3 topmostPt() const {
@@ -337,26 +337,26 @@ struct CRTTrack {
 
   friend std::ostream &operator<<(std::ostream &os, const CRTTrack &track) {
     os << "xt: " << track.xt << ", yt: " << track.yt << ", zt: " << track.zt << ", xm: " << track.xm << ", ym: "
-       << track.ym << ", zm: " << track.zm << ", xb: " << track.xb << ", yb: " << track.yb << ", zb: " << track.zb;
+        << track.ym << ", zm: " << track.zm << ", xb: " << track.xb << ", yb: " << track.yb << ", zb: " << track.zb;
     return os;
   }
 
   [[nodiscard]] bool containsPt(const CRTHit &hit) const {
     return (epsEqual(hit.x, xt) && epsEqual(hit.y, yt) && epsEqual(hit.z, zt)) ||
-           (epsEqual(hit.x, xm) && epsEqual(hit.y, ym) && epsEqual(hit.z, zm)) ||
-           (epsEqual(hit.x, xb) && epsEqual(hit.y, yb) && epsEqual(hit.z, zb));
+        (epsEqual(hit.x, xm) && epsEqual(hit.y, ym) && epsEqual(hit.z, zm)) ||
+        (epsEqual(hit.x, xb) && epsEqual(hit.y, yb) && epsEqual(hit.z, zb));
   }
 
   bool operator==(const CRTTrack &rhs) const {
     return xt == rhs.xt &&
-           yt == rhs.yt &&
-           zt == rhs.zt &&
-           xm == rhs.xm &&
-           ym == rhs.ym &&
-           zm == rhs.zm &&
-           xb == rhs.xb &&
-           yb == rhs.yb &&
-           zb == rhs.zb;
+        yt == rhs.yt &&
+        zt == rhs.zt &&
+        xm == rhs.xm &&
+        ym == rhs.ym &&
+        zm == rhs.zm &&
+        xb == rhs.xb &&
+        yb == rhs.yb &&
+        zb == rhs.zb;
   }
 
   bool operator!=(const CRTTrack &rhs) const {
@@ -396,15 +396,19 @@ namespace std {
   };
 }
 
+/// coordinate where the three wires intersect
 std::optional<TVector3> intersection(Wire plane2, Wire plane1, Wire plane0);
 
+/// load wire geometry
 std::vector<Wire> parse_wires();
 
+/// load crt strip geometry
 std::vector<CRTStrip> parse_strips();
 
-void
-tpcMatch(const std::vector<Wire> &wires, const std::vector<WireHit> &tcpPlane, std::vector<TVector3> &intersects,
-         TPolyMarker3D *intersectMarks, int n);
+/// finds all intersections points of WireHits on one TPC wire plane
+void wireHitIntersections(const std::vector<Wire> &wires, const std::vector<WireHit> &tpcPlane,
+                          std::vector<TVector3> &intersects,
+                          TPolyMarker3D *intersectMarks);
 
 void addPoint(TPolyMarker3D *pts, const TVector3 &vector);
 
@@ -418,15 +422,18 @@ double stddev(const std::vector<TVector3> &pts, const std::optional<TVector3> &o
 
 std::string vecToStr(const TVector3 &vec);
 
-void wires(bool allTracks, int n) {
+/// main method. n is the event to look at, or -1 to look at all events
+/// makes some assumptions about directory structure: the dir this is run from has a `hitdumper_tree.root`,
+/// and the dir above this has `WireDumpSBND.txt` and `StripDumpSBND.txt`
+void wires(int n) {
+  // initialize ROOT stuff
   auto *c1 = new TCanvas("c1", "c1"); // to make root not print that this is created
   auto *file = TFile::Open("hitdumper_tree.root");
   auto *hitdumper = (TDirectoryFile *) file->Get("hitdumper");
   hitdumper->cd();
   auto *tree = (TTree *) hitdumper->Get("hitdumpertree");
-  auto *matchedCRTHits = new TH1D("num matches", "num matches", 20, 0, 20);
-  matchedCRTHits->SetStats(false);
 
+  // load geometry
   std::vector<Wire> wires = parse_wires();
   std::vector<CRTStrip> strips = parse_strips();
 
@@ -454,7 +461,7 @@ void wires(bool allTracks, int n) {
   int crtHitTotal = 0;
   int crtHitMatches = 0;
 
-  // draw hits
+  // draw crt hits
   auto *chitMarker = new TPolyMarker3D(CHITS);
   long low = (n == -1) ? 0 : n;
   long high = (n == -1) ? tree->GetEntries() : n + 1;
@@ -470,6 +477,7 @@ void wires(bool allTracks, int n) {
       nwhits = WHITS;
     }
 
+    // read CRT/Wire hits from ROOT tree
     std::vector<CRTHit> chits;
     std::vector<WireHit> whits;
     for (int j = 0; j < nchits; ++j) {
@@ -484,6 +492,7 @@ void wires(bool allTracks, int n) {
       whits.emplace_back(channel[j], cryo[j], tpc[j], plane[j], wire[j], peakT[j]);
     }
 
+    // top and mid are the planes above detector, bot is below
     std::vector<CRTHit> top, mid, bot;
     for (CRTHit hit : chits) {
       if (near_top(hit.y)) {
@@ -493,27 +502,18 @@ void wires(bool allTracks, int n) {
       } else {
         bot.push_back(hit);
       }
-      /* else if (near_bot(hit.y)) {
-        bot.push_back(hit);
-      } else {
-        std::cout << "Not on plane || to Y -> " << hit << std::endl;
-      }*/
     }
 
+    // reconstruct CRTTracks (neither of the two in the ROOT tree worked for this, one because it was always empty)
     std::vector<CRTTrack> tracks;
     for (const auto &thit : top) {
       for (const auto &mhit : mid) {
         tracks.push_back(CRTTrack::topMid(thit.x, thit.y, thit.z, mhit.x, mhit.y, mhit.z));
       }
-//        std::sort(mid.begin(), mid.end(), [&](const CRTHit &a, const CRTHit &b) {
-//          return std::hypot(a.x - thit.x, a.z - thit.z) < std::hypot(b.x - thit.x, b.z - thit.z);
-//        });
-//        double dist = std::hypot(thit.x - mid[0].x, thit.z - mid[0].z);
-//        std::cout << "dist = " << dist << std::endl;
-//
-//        CRTTrack track(thit.x, thit.y, thit.z, mid[0].x, mid[0].y, mid[0].z);
-//        tracks.push_back(track);
     }
+    // the bottom plane doesn't have x coord because of it only has one plane of strips, so the actual
+    // x coordinate is projected down from the top planes. Replaces all top->mid tracks with (potentially multiple)
+    // top->mid->bot tracks.
     auto *projPts = new TPolyMarker3D();
     if (!bot.empty()) {
       for (int j = tracks.size(); j > 0; --j) {
@@ -539,6 +539,7 @@ void wires(bool allTracks, int n) {
     }
 
     unsigned long firstIncomplete = tracks.size();
+    // every permutation of incomplete top->bot and mid->bot tracks
     for (const auto &bhit : bot) {
       for (const auto &thit : top) {
         tracks.push_back(CRTTrack::topBot(thit.x, thit.y, thit.z, bhit.x, bhit.y, bhit.z));
@@ -548,6 +549,7 @@ void wires(bool allTracks, int n) {
       }
     }
 
+    // remove duplicate top->bot or mid->bot tracks that are already part of a top->mid->bot track
     if (firstIncomplete != 0) {
       for (unsigned long j = tracks.size() - 1; j >= firstIncomplete; --j) {
         auto incomp = tracks[j];
@@ -561,15 +563,8 @@ void wires(bool allTracks, int n) {
       }
     }
     std::cout << "#tracks = " << tracks.size() << std::endl;
-    if (tracks.size() > 200) continue;
 
-    if (allTracks) {
-      for (const auto &track : tracks) {
-        track.draw();
-      }
-    }
-
-    // Sort by time, with the vertical planes always first
+    // Sort by time then by plane (vertical plane first)
     std::sort(whits.begin(), whits.end(), [](const WireHit &a, const WireHit &b) {
       if (a.peakTick < b.peakTick) {
         return true;
@@ -589,8 +584,8 @@ void wires(bool allTracks, int n) {
 
     auto *intersectMarks = new TPolyMarker3D();
     std::vector<TVector3> intersects;
-    tpcMatch(wires, tpc0, intersects, intersectMarks, n);
-    tpcMatch(wires, tpc1, intersects, intersectMarks, n);
+    wireHitIntersections(wires, tpc0, intersects, intersectMarks);
+    wireHitIntersections(wires, tpc1, intersects, intersectMarks);
     std::cout << "num intersects = " << intersectMarks->Size() << std::endl;
     intersectMarks->SetMarkerStyle(kFullDotMedium);
     intersectMarks->SetMarkerColor(kRed);
@@ -598,14 +593,9 @@ void wires(bool allTracks, int n) {
       intersectMarks->Draw();
     }
 
-    auto *trace = new TPolyMarker3D();
-//    std::vector<double> scores;
+    // score each track: walk down track, project it onto the wire plane, and count nearby wire hits
     hashmap<CRTTrack, double> scores;
-//    int idx = 0;
     for (const auto &track : tracks) {
-//      if (idx++ != 5) continue;
-//      track.draw();
-
       double score = 0;
       int tot = 0;
 
@@ -617,27 +607,18 @@ void wires(bool allTracks, int n) {
       for (
           TVector3 pt = track.topmostPt();
           pt.Y() > -200; // -200 is the bottom of tcp plane
-//          pt = TVector3(pt.X(), pt.Y() - delta, pt.Z() - slopeZ * delta)
           pt -= TVector3(slopeX * delta, delta, slopeZ * delta)
           ) {
         if (pt.Y() > 200) continue; // 200 is top of tcp plane
-//          double y = pt.Y(),
-//              z = pt.Z();
-//          flip(&y, &z, 1);
-//          trace->SetNextPoint(pt.X(), y, z);
-
         for (const auto &intersect : intersects) {
-          if (std::signbit(intersect.X()) != std::signbit(pt.X()))
+          if (std::signbit(intersect.X()) != std::signbit(pt.X())) {
             continue; // ensure intersect and track are at same wire plane
+          }
           ++tot;
           auto projected = pt;
           projected.SetX(intersect.x());
           double mag = (projected - intersect).Mag();
           int maxDist = 5;
-//            double y = intersect.Y(),
-//                z = intersect.Z();
-//            flip(&y, &z, 1);
-//            trace->SetNextPoint(intersect.X(), y, z);
           if (mag < maxDist) {
             ++score;
             usedIntersects.insert(intersect);
@@ -651,34 +632,11 @@ void wires(bool allTracks, int n) {
         score /= tot;
       }
       std::cout << "score = " << score << std::endl;
-//      scores.push_back(score);
       scores.emplace(track, score);
     }
-    trace->SetMarkerStyle(kFullDotMedium);
-    trace->SetMarkerColor(kGreen + 2);
-    std::cout << "trace size: " << trace->Size() << std::endl;
-    if constexpr (DRAW) {
-      trace->Draw();
-    }
 
-//    std::vector<int> bounds;
-//    bounds.push_back(0);
-//    for (int j = 1; j < tracks.size(); ++j) {
-//      CRTTrack &prev = tracks[j - 1];
-//      CRTTrack &curr = tracks[j];
-//      if (!prev.midEq(curr)/* && !prev.topEq(curr) && !prev.botEq(curr)*/) {
-//        bounds.push_back(j);
-//      }
-//    }
-//    bounds.push_back(tracks.size());
-//
-//    std::cout << "bounds = [";
-//    for (int bound : bounds) {
-//      std::cout << bound << ",";
-//    }
-//    std::cout << "]" << std::endl;
-
-    hashmap<CRTTrack, std::vector<TVector3>> trackHits;
+    hashmap<CRTTrack, std::vector<TVector3>> trackHits; // unused
+    // each point to a list of each track that includes that point
     hashmap<TVector3, std::vector<CRTTrack>> hitTracks;
     for (const CRTTrack track : tracks) {
       trackHits.emplace(track, std::vector<TVector3>());
@@ -708,35 +666,17 @@ void wires(bool allTracks, int n) {
       }
     }
 
-//    std::vector<CRTTrack> matches;
-//    for (int b = 0; b < bounds.size() - 1; ++b) {
-//      int maxIdx;
-//      double maxScore = -1;
-//      for (int j = bounds[b]; j < bounds[b + 1]; ++j) {
-//        double score = scores[j];
-//        if (score >= maxScore) {
-//          maxScore = score;
-//          maxIdx = j;
-//        }
-//      }
-//      if (maxScore > 0.0001) {
-//        matches.push_back(tracks[maxIdx]);
-//        tracks[maxIdx].draw();
-//        std::cout << "maxIdx = " << maxIdx
-//                  << ", score = " << maxScore
-//                  << ", track = " << tracks[maxIdx] << std::endl;
-//      }
-//    }
-
+    // only the tracks that match a wire intersects "track"
     std::vector<CRTTrack> matches;
     for (const auto &hitTrack : hitTracks) {
       const auto&[hit, htracks] = hitTrack;
-      std::cout << "vecToStr(hit) = " << vecToStr(hit) << std::endl;
+//      std::cout << "vecToStr(hit) = " << vecToStr(hit) << std::endl;
       int maxIdx;
       double maxScore = -1;
+      // get best match for TVector3 track point
       for (int j = 0; j < htracks.size(); ++j) {
         double score = scores[htracks[j]];
-        std::cout << "htracks[j]: score = " << score << ",  = " << htracks[j] << std::endl;
+//        std::cout << "htracks[j]: score = " << score << ",  = " << htracks[j] << std::endl;
         if (score >= maxScore) {
           maxScore = score;
           maxIdx = j;
@@ -751,8 +691,8 @@ void wires(bool allTracks, int n) {
             oldTrackIdxs.push_back(j);
           }
         }
-        if (!oldTrackIdxs.empty()) { // if new track shares point with any track already in matches, only keep the higher scored one
-          std::cout << "NOT NEW: " << oldTrackIdxs.size() << " overlaps!" << std::endl;
+        if (!oldTrackIdxs.empty()) { // if new track shares point with any track already in matches, only keep the highest scored one
+//          std::cout << "NOT NEW: " << oldTrackIdxs.size() << " overlaps!" << std::endl;
           bool newBest = true;
           for (unsigned long j = oldTrackIdxs.size() - 1; j > 0; --j) {
             int oldTrackIdx = oldTrackIdxs[j];
@@ -762,20 +702,21 @@ void wires(bool allTracks, int n) {
             if (newScore < oldScore) {
               newBest = false;
             } else {
-              std::cout << "REMOVING: " << oldTrackIdx << std::endl;
+//              std::cout << "REMOVING: " << oldTrackIdx << std::endl;
               matches.erase(matches.begin() + oldTrackIdx);
             }
           }
           if (newBest) { // erase oldTrack, put in newTrack
-            std::cout << "UPDATING " << std::endl;
+//            std::cout << "UPDATING " << std::endl;
             matches.push_back(newTrack);
           }
         } else {
-          std::cout << "NEW" << std::endl;
+//          std::cout << "NEW" << std::endl;
           matches.push_back(newTrack);
         }
       }
     }
+
     std::cout << "matches.size() = " << matches.size() << std::endl;
     for (const auto &match : matches) {
       match.draw();
@@ -790,11 +731,10 @@ void wires(bool allTracks, int n) {
       }
     }
     crtHitMatches += nmatch;
-    matchedCRTHits->Fill(nmatch);
-//    matchedCRTHits->AddBinContent(nmatch);
 
     std::cout << std::endl;
-  }
+  } // end of events for loop
+
   chitMarker->SetMarkerStyle(kFullDotMedium);
   chitMarker->SetMarkerColor(kBlue);
   if constexpr (DRAW) {
@@ -826,11 +766,11 @@ void addPoint(TPolyMarker3D *pts, const TVector3 &vector) {
   }
 }
 
-void
-tpcMatch(const std::vector<Wire> &wires, const std::vector<WireHit> &tcpPlane, std::vector<TVector3> &intersects,
-         TPolyMarker3D *intersectMarks, int n) {
+void wireHitIntersections(const std::vector<Wire> &wires, const std::vector<WireHit> &tpcPlane,
+                          std::vector<TVector3> &intersects,
+                          TPolyMarker3D *intersectMarks) {
   std::vector<WireHit> plane2, plane1, plane0;
-  for (WireHit whit : tcpPlane) {
+  for (WireHit whit : tpcPlane) {
     if (whit.plane == 2) {
       plane2.push_back(whit);
     } else if (whit.plane == 1) {
@@ -879,23 +819,7 @@ std::optional<TVector3> intersection(Wire plane2, Wire plane1, Wire plane0) {
   // intersection of wire 1 and wire 0
   double z = (m1 * (plane1.z1 + plane0.z1) + plane0.y1 - plane1.y1) / (2 * m1);
 
-//  if (std::abs(z - plane2.zt) > 1) {
-//    return std::optional<TVector3>();
-//  }
-
-//  plane2.draw();
-//  plane1.draw();
-//  plane0.draw();
-
   double y = m1 * (z - plane1.z1) + plane1.y1;
-
-  // how different are the Z values??
-//  double p[] {x, y, plane2.zt};
-//  flip(&p[1], &p[2], 1);
-//  auto *pt = new TPolyMarker3D(1, p);
-//  pt->SetMarkerColor(kGreen);
-//  pt->SetMarkerStyle(kFullDotMedium);
-//  pt->Draw();
 
   return std::optional<TVector3>(TVector3(x, y, plane2.z1));
 //  return std::optional<TVector3>(TVector3(x, y, z));
@@ -905,7 +829,6 @@ std::vector<Wire> parse_wires() {
   std::vector<Wire> wires;
 
   std::ifstream file("../WireDumpSBND.txt");
-//    std::ifstream file(childDir.append("/..").c_str());
   std::string line;
   while (std::getline(file, line)) {
     Wire wire {};
