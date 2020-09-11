@@ -8,4 +8,5 @@ INCLUDE_DIRECTORIES("/home/schwandr/root/include")
 add_executable(scratch
         wires.cpp
         plot.cpp
-        )
+        structs.h
+        utils.h)
