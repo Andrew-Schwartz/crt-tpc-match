@@ -51,6 +51,10 @@ void wires(int n = -1) {
   hitdumper->cd();
   auto *tree = (TTree *) hitdumper->Get("hitdumpertree");
 
+  // Histogram of stuff???
+  auto *matchedCRTHits = new TH1D("num matches", "num matches", 20, 0, 20);
+  matchedCRTHits->SetStats(false);
+
   // load geometry
   std::vector<Wire> wires = parse_wires();
   std::vector<CRTStrip> strips = parse_strips();
@@ -256,85 +260,72 @@ void wires(int n = -1) {
       scores.emplace(track, score);
     }
 
-    hashmap<CRTTrack, std::vector<TVector3>> trackHits; // unused
+    // each track to a list of of top/bot/mid points on that track
+    hashmap<CRTTrack, std::vector<TVector3>> trackToHits;
     // each point to a list of each track that includes that point
-    hashmap<TVector3, std::vector<CRTTrack>> hitTracks;
+    hashmap<TVector3, std::vector<CRTTrack>> hitToTracks;
     for (const CRTTrack track : tracks) {
-      trackHits.emplace(track, std::vector<TVector3>());
+      trackToHits.emplace(track, std::vector<TVector3>());
       std::optional<TVector3> top = track.top();
       if (top) {
-        trackHits[track].push_back(*top);
-        if (hitTracks.find(*top) == hitTracks.end()) { // not in map
-          hitTracks.insert({*top, std::vector<CRTTrack>()});
+        trackToHits[track].push_back(*top);
+        if (hitToTracks.find(*top) == hitToTracks.end()) { // not in map
+          hitToTracks.insert({*top, std::vector<CRTTrack>()});
         }
-        hitTracks[*top].push_back(track);
+        hitToTracks[*top].push_back(track);
       }
       std::optional<TVector3> mid = track.mid();
       if (mid) {
-        trackHits[track].push_back(*mid);
-        if (hitTracks.find(*mid) == hitTracks.end()) { // not in map
-          hitTracks.insert({*mid, std::vector<CRTTrack>()});
+        trackToHits[track].push_back(*mid);
+        if (hitToTracks.find(*mid) == hitToTracks.end()) { // not in map
+          hitToTracks.insert({*mid, std::vector<CRTTrack>()});
         }
-        hitTracks[*mid].push_back(track);
+        hitToTracks[*mid].push_back(track);
       }
       std::optional<TVector3> bot = track.bot();
       if (bot) {
-        trackHits[track].push_back(*bot);
-        if (hitTracks.find(*bot) == hitTracks.end()) { // not in map
-          hitTracks.insert({*bot, std::vector<CRTTrack>()});
+        // todo what's the default ± value for x?
+        TVector3 xFixedBot = TVector3(0.0, bot->y(), bot->z());
+        trackToHits[track].push_back(xFixedBot);
+        if (hitToTracks.find(xFixedBot) == hitToTracks.end()) { // not in map
+          hitToTracks.insert({xFixedBot, std::vector<CRTTrack>()});
         }
-        hitTracks[*bot].push_back(track);
+        hitToTracks[xFixedBot].push_back(track);
       }
     }
 
     // only the tracks that match a wire intersects "track"
     std::vector<CRTTrack> matches;
-    for (const auto &hitTrack : hitTracks) {
-      const auto&[hit, htracks] = hitTrack;
-//      std::cout << "vecToStr(hit) = " << vecToStr(hit) << std::endl;
-      int maxIdx;
-      double maxScore = -1;
-      // get best match for TVector3 track point
-      for (int j = 0; j < htracks.size(); ++j) {
-        double score = scores[htracks[j]];
-//        std::cout << "htracks[j]: score = " << score << ",  = " << htracks[j] << std::endl;
-        if (score >= maxScore) {
-          maxScore = score;
-          maxIdx = j;
-        }
-      }
-      if (maxScore > 0.0001) {
-        auto newTrack = htracks[maxIdx];
-        std::vector<int> oldTrackIdxs;
-        for (int j = 0; j < matches.size(); ++j) {
-          auto track = matches[j];
-          if (track.topEq(newTrack) || track.midEq(newTrack) || track.botEq(newTrack)) {
-            oldTrackIdxs.push_back(j);
-          }
-        }
-        if (!oldTrackIdxs.empty()) { // if new track shares point with any track already in matches, only keep the highest scored one
-//          std::cout << "NOT NEW: " << oldTrackIdxs.size() << " overlaps!" << std::endl;
-          bool newBest = true;
-          for (unsigned long j = oldTrackIdxs.size() - 1; j > 0; --j) {
-            int oldTrackIdx = oldTrackIdxs[j];
-            auto oldTrack = matches[oldTrackIdx];
-            double oldScore = scores[oldTrack];
-            double newScore = scores[newTrack];
-            if (newScore < oldScore) {
-              newBest = false;
-            } else {
-//              std::cout << "REMOVING: " << oldTrackIdx << std::endl;
-              matches.erase(matches.begin() + oldTrackIdx);
+    // hacky solution until I think of a better way to get at least one per repeated x
+    hashset<double> usedScores;
+    for (const CRTTrack &track : tracks) {
+      std::vector<TVector3> hits = trackToHits[track];
+      bool best = true;
+      if (scores[track] > 0.0001) {
+        for (const TVector3 &hit : hits) {
+          std::vector<CRTTrack> htracks = hitToTracks[hit];
+          for (const CRTTrack &htrack : htracks) {
+            if (track == htrack) continue;
+            if (scores[track] < scores[htrack]) {
+              best = false;
+              break;
+            } else if (scores[track] == scores[htrack]) {
+              if (usedScores.find(scores[track]) != usedScores.end()) { // score already used
+                best = false;
+                break;
+              }
             }
           }
-          if (newBest) { // erase oldTrack, put in newTrack
-//            std::cout << "UPDATING " << std::endl;
-            matches.push_back(newTrack);
-          }
-        } else {
-//          std::cout << "NEW" << std::endl;
-          matches.push_back(newTrack);
         }
+      } else {
+        best = false;
+      }
+      if (best) {
+        matches.push_back(track);
+        usedScores.insert(scores[track]);
+        std::cout << "BEST! score = " << scores[track]
+                  << "\t\t" << track
+                  << std::endl;
       }
     }
 
