@@ -6,7 +6,7 @@ SET(CMAKE_CXX_STANDARD 17)
 INCLUDE_DIRECTORIES("/home/schwandr/root/include")
 
 add_executable(scratch
-        wires.cpp
-        plot.cpp
-        structs.h
-        utils.h)
+        src/wires.cpp
+        src/plot.cpp
+        src/structs.h
+        src/utils.h)

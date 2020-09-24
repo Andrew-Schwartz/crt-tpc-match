@@ -1,5 +1,5 @@
 #pragma clang diagnostic push
-#pragma ide diagnostic ignored "Simplify" // IDE was angry that DRAW is const and wanted to simplify ifs with it
+#pragma ide diagnostic ignored "Simplify" // IDE was angry that OUTPUT is const and wanted to simplify ifs with it
 
 #include <iostream>
 #include <TPolyLine3D.h>
@@ -14,7 +14,7 @@ struct Wire {
   double x2, y2, z2;
 
   void draw() const {
-    if constexpr (!DRAW) return;
+    if constexpr (OUTPUT != Output::Draw) return;
     double xs[] {x1, x2},
         ys[] {y1, y2},
         zs[] {z1, z2};
@@ -107,7 +107,7 @@ struct CRTStrip {
   double x2, y2, z2;
 
   void draw() const {
-    if constexpr (!DRAW) return;
+    if constexpr (OUTPUT != Output::Draw) return;
     double xs[] {x1, x2},
         ys[] {y1, y2},
         zs[] {z1, z2};
@@ -201,7 +201,7 @@ struct CRTTrack {
   }
 
   void draw(Color_t color = kBlack) const {
-    if constexpr (!DRAW) return;
+    if constexpr (OUTPUT != Output::Draw) return;
     TPolyLine3D *line;
     if (xb == 0 && yb == 0 && zb == 0) {
       double xs[] {xt, xm},

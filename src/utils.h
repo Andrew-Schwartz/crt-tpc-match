@@ -7,9 +7,12 @@ using hashset = std::unordered_set<T>;
 template<class K, class V>
 using hashmap = std::unordered_map<K, V>;
 
+enum class Output {
+  Draw, Histogram
+};
+
 // config variables
-//todo this should be used in different places I think or not a const
-constexpr bool DRAW = true;
+constexpr Output OUTPUT = Output::Histogram;
 constexpr bool FLIP = true;
 constexpr size_t CHITS = 100;
 constexpr size_t WHITS = 30000;

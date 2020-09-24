@@ -31,16 +31,16 @@ void wireHitIntersections(const std::vector<Wire> &wires,
                           std::vector<TVector3> &intersects);
 
 #pragma clang diagnostic push
-#pragma ide diagnostic ignored "Simplify" // IDE was angry that DRAW is const and wanted to simplify ifs with it
+#pragma ide diagnostic ignored "Simplify" // IDE was angry that OUTPUT is const and wanted to simplify ifs with it
 
 /// main method. n is the event to look at, or -1 to look at all events
 /// makes some assumptions about directory structure: the dir this is run from has a `hitdumper_tree.root`,
 /// and the dir above this has `WireDumpSBND.txt` and `StripDumpSBND.txt`
-void wires(int n = -1) {
-  if (DRAW && n == -1) {
+void wires(int n = -1, int bins = 10) {
+  if (OUTPUT == Output::Draw && n == -1) {
     std::cout << "Cannot draw every event at once (ROOT gets angry)"
               << "\n Try calling wires with a specific (zero-indexed) event number"
-              << "\n or compiling with DRAW = false"
+              << "\n or compiling with OUTPUT = false"
               << std::endl;
     return;
   }
@@ -51,9 +51,12 @@ void wires(int n = -1) {
   hitdumper->cd();
   auto *tree = (TTree *) hitdumper->Get("hitdumpertree");
 
-  // Histogram of stuff???
-  auto *matchedCRTHits = new TH1D("num matches", "num matches", 20, 0, 20);
-  matchedCRTHits->SetStats(false);
+  // Histogram of % real hits
+  auto *realHist = new TH1D("realHist", "percent real hits", bins, 0.0, 1.1);
+
+  auto *nchitsHist = new TH1D("nchitsHist", "num chits", 10, 0.0, 1.0);
+  auto *matchesHist = new TH1D("matchesHist", "num matches", 10, 0.0, 1.0);
+//  matchesHist->SetStats(false);
 
   // load geometry
   std::vector<Wire> wires = parse_wires();
@@ -80,20 +83,19 @@ void wires(int n = -1) {
   tree->SetBranchAddress("chit_time", &t);
   tree->SetBranchAddress("nchits", &nchits);
 
-  int crtHitTotal = 0;
-  int crtHitMatches = 0;
 
   // draw crt hits
   auto *chitMarker = new TPolyMarker3D(CHITS);
   long low = (n == -1) ? 0 : n;
   long high = (n == -1) ? tree->GetEntries() : n + 1;
   for (long i = low; i < high; ++i) {
+    int crtHitMatches = 0;
+
     tree->GetEntry(i);
     if (nchits > CHITS) {
       std::cout << "TOO FEW MAX CRT HITS, only " << CHITS << " of " << nchits << " hits are being used" << std::endl;
       nchits = CHITS;
     }
-    crtHitTotal += nchits;
     if (nwhits > WHITS) {
       std::cout << "TOO FEW MAX WIRE HITS, only " << WHITS << " of " << nwhits << " hits are being used" << std::endl;
       nwhits = WHITS;
@@ -145,7 +147,6 @@ void wires(int n = -1) {
           TVector3 proj = track.projectY(bhit.y);
           TVector3 bvec(bhit.x, bhit.y, bhit.z);
           double dist = (bvec - proj).Mag();
-          std::cout << "proj dist = " << dist << std::endl;
           bool sameSide = std::signbit(proj.x()) == std::signbit(bhit.x);
           if (sameSide && dist < 600) { // TODO tune this a bit (maybe instead check that proj is inside CRT?)
             addPoint(projPts, TVector3(proj.x(), bhit.y, bhit.z));
@@ -154,7 +155,7 @@ void wires(int n = -1) {
         }
       }
     }
-    if constexpr (DRAW) {
+    if constexpr (OUTPUT == Output::Draw) {
       projPts->SetMarkerStyle(kFullDotMedium);
       projPts->SetMarkerColor(kGreen);
       projPts->Draw();
@@ -184,7 +185,7 @@ void wires(int n = -1) {
         }
       }
     }
-    std::cout << "#tracks = " << tracks.size() << std::endl;
+//    std::cout << "#tracks = " << tracks.size() << std::endl;
 
     // Sort by time then by plane (vertical plane first)
     std::sort(whits.begin(), whits.end(), [](const WireHit &a, const WireHit &b) {
@@ -207,8 +208,8 @@ void wires(int n = -1) {
     std::vector<TVector3> intersects;
     wireHitIntersections(wires, tpc0, intersects);
     wireHitIntersections(wires, tpc1, intersects);
-    std::cout << "num intersects = " << intersects.size() << std::endl;
-    if constexpr (DRAW) {
+//    std::cout << "num intersects = " << intersects.size() << std::endl;
+    if constexpr (OUTPUT == Output::Draw) {
       auto *intersectMarks = new TPolyMarker3D();
       for (const auto &intersect : intersects) {
         addPoint(intersectMarks, intersect);
@@ -256,7 +257,7 @@ void wires(int n = -1) {
       } else {
         score /= tot;
       }
-      std::cout << "score = " << score << std::endl;
+//      std::cout << "score = " << score << "\t\t\t" << track << std::endl;
       scores.emplace(track, score);
     }
 
@@ -301,7 +302,7 @@ void wires(int n = -1) {
     for (const CRTTrack &track : tracks) {
       std::vector<TVector3> hits = trackToHits[track];
       bool best = true;
-      if (scores[track] > 0.0001) {
+      if (scores[track] > 0.000001) {
         for (const TVector3 &hit : hits) {
           std::vector<CRTTrack> htracks = hitToTracks[hit];
           for (const CRTTrack &htrack : htracks) {
@@ -323,13 +324,10 @@ void wires(int n = -1) {
       if (best) {
         matches.push_back(track);
         usedScores.insert(scores[track]);
-        std::cout << "BEST! score = " << scores[track]
-                  << "\t\t" << track
-                  << std::endl;
       }
     }
 
-    std::cout << "matches.size() = " << matches.size() << std::endl;
+//    std::cout << "matches.size() = " << matches.size() << std::endl;
     for (const auto &match : matches) {
       match.draw();
     }
@@ -342,20 +340,27 @@ void wires(int n = -1) {
         }
       }
     }
-    crtHitMatches += nmatch;
 
-    std::cout << std::endl;
-  } // end of events for loop
+    double realPct = ((double) nmatch) / nchits;
+    std::cout << "realPct = " << realPct << std::endl;
+    realHist->Fill(realPct);
+    nchitsHist->Fill(nchits);
+    matchesHist->Fill(nmatch);
 
-  if constexpr (DRAW) {
+//    std::cout << std::endl;
+  } // end of for loop over all events
+
+  if constexpr (OUTPUT == Output::Draw) {
     chitMarker->SetMarkerStyle(kFullDotMedium);
     chitMarker->SetMarkerColor(kBlue);
     chitMarker->Draw();
   }
 
-  std::cout << "crtHitTotal = " << crtHitTotal << std::endl;
-  std::cout << "crtHitMatches = " << crtHitMatches << std::endl;
-  std::cout << "real% = " << ((double) crtHitMatches) / (crtHitTotal) * 100.0 << std::endl;
+  if (OUTPUT == Output::Histogram) {
+    realHist->Draw();
+//    nchitsHist->Draw();
+//    matchesHist->Draw();
+  }
 
 //   draw wires
   for (int i = 0; i < wires.size(); i += 50) {

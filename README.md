@@ -6,7 +6,7 @@ The main ROOT macro is `wires.cpp`. In ROOT, run `wires(n)` where n is the event
  the directory above that contains `WireDumpSBND.txt` and `StripDumpSBND.txt`. Config variables can be found near the 
  top of the file. 
  
- `DRAW`: controls whether the hits, track, etc are drawn.
+ `OUTPUT`: controls whether the hits, track, etc are drawn.
 
  `FLIP`: ROOT draws the z-axis as the vertical, setting this to true makes the y-axis the vertical.
  
