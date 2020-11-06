@@ -341,6 +341,48 @@ namespace std {
   };
 }
 
+/**
+ * Stores wire hit TVector3's grouped by height (N groups) for faster finding of points by y coordinate
+ */
+template<size_t N>
+struct IntersectsByHeight {
+  typedef std::vector<TVector3> Pts;
+
+  std::array<Pts, N> by_height;
+
+  explicit IntersectsByHeight(const Pts &all) {
+    std::array<Pts, N> array;
+
+    for (TVector3 point : all) {
+      array[get_idx(point.y())].push_back(point);
+    }
+
+    by_height = array;
+  }
+
+  [[nodiscard]] std::pair<std::reference_wrapper<const Pts>, std::optional<std::reference_wrapper<const Pts>>>
+  at_y(double y) const {
+    const size_t idx = get_idx(y);
+    std::optional<std::reference_wrapper<const Pts>> nearby = std::nullopt;
+    if (get_idx(y - 5.0f) != idx) {
+      nearby = std::cref(by_height[idx - 1]);
+    } else if (get_idx(y + 5.0f) != idx) {
+      nearby = std::cref(by_height[idx + 1]);
+    }
+    return std::make_pair(std::cref(by_height[idx]), nearby);
+  }
+
+private:
+  static const size_t per_bin = 400 / N;
+
+  static size_t get_idx(double y) {
+    int idx = (y + 200) / per_bin;
+    if (idx < 0) idx = 0;
+    if (idx >= (int) N) idx = N - 1;
+    return (size_t) idx;
+  }
+};
+
 /// load wire geometry
 std::vector<Wire> parse_wires() {
   std::vector<Wire> wires;

@@ -1,9 +1,10 @@
 <?xml version="1.0"?>
 <!DOCTYPE project [
         <!ENTITY user_id "aschwart">
-        <!ENTITY name "nucc_mcc9_ovr">
-        <!ENTITY number_of_events "32000">
-        <!ENTITY relntuple "v08_00_00_42">
+        <!ENTITY name "grid-test-QT80_0">
+        <!ENTITY qt "80_0">
+        <!ENTITY number_of_events "20000">
+        <!ENTITY relntuple "v09_03_00">
         <!ENTITY file_type "mc">
         <!ENTITY run_type "physics">
         <!ENTITY prod_mode "test">
@@ -14,30 +15,34 @@
         <numevents>&number_of_events;</numevents>
         <os>SL7</os>
         <version>&prod_mode;_&relntuple;</version>
-        <resource>DEDICATED,OPPORTUNISTIC,OFFSITE</resource>
+        <resource>DEDICATED,OPPORTUNISTIC</resource>
         <larsoft>
             <tag>&relntuple;</tag>
-            <qual>e17:prof</qual>
-            <local>/pnfs/uboone/resilient/users/mastbaum/tars/uboonecode-v08_00_00_33-largctests6.tar.gz</local>
+            <qual>e19:prof</qual>
+            <local>/pnfs/sbnd/resilient/users/&user_id;/tars/sbndcode_QT&qt;_hitdumper_v09_03_00.tar.gz</local>
         </larsoft>
 
         <check>0</check>
         <copy>0</copy>
 
         <stage name="ntuple">
-            <fcl>/uboone/data/users/mastbaum/mcc9/reco/nucc/nucc_mc.fcl</fcl>
-            <outdir>/pnfs/uboone/scratch/users/&user_id;/&relntuple;/ntuple/&name;</outdir>
-            <logdir>/pnfs/uboone/scratch/users/&user_id;/&relntuple;/ntuple/&name;</logdir>
-            <workdir>/pnfs/uboone/scratch/users/&user_id;/work/&relntuple;/ntuple/&name;</workdir>
-            <inputdef>prodgenie_bnb_nu_uboone_overlay_mcc9.1_v08_00_00_26_filter_run1_reco2_reco2</inputdef>
+            <fcl>/sbnd/app/users/aschwart/wkdir/above/configs/a/prodsingle_muon_sbnd.fcl</fcl>
+            <fcl>standard_g4_sbnd.fcl</fcl>
+            <fcl>QT&qt;_detsim_sbnd.fcl</fcl>
+            <fcl>crtsimreco_sbnd.fcl</fcl>
+            <fcl>run_hitdumper.fcl</fcl>
+            <outdir>/pnfs/sbnd/scratch/users/&user_id;/&relntuple;/&name;</outdir>
+            <logdir>/pnfs/sbnd/scratch/users/&user_id;/&relntuple;/&name;</logdir>
+            <workdir>/pnfs/sbnd/scratch/users/&user_id;/work/&relntuple;/&name;</workdir>
             <!-- uncomment for real running -->
-            <!--
             <maxfilesperjob>50</maxfilesperjob>
             <numjobs>500</numjobs>
-            -->
             <!-- uncomment for testing -->
-            <maxfilesperjob>10</maxfilesperjob>
-            <numjobs>2</numjobs>
+            <!--            <maxfilesperjob>10</maxfilesperjob>-->
+            <!--            <numjobs>5</numjobs>-->
+
+            <maxfluxfilemb>0</maxfluxfilemb>
+            <!--            <disk>30GB</disk>-->
             <memory>2000</memory>
             <schema>root</schema><!-- xrootd -->
         </stage>

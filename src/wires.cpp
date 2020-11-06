@@ -1,4 +1,6 @@
 #include <vector>
+#include <fstream>
+#include <unordered_map>
 #include <iostream>
 #include <cmath>
 #include <TTree.h>
@@ -7,6 +9,7 @@
 #include <TCanvas.h>
 #include <TVector3.h>
 #include <TH2D.h>
+#include <chrono>
 #include "utils.h"
 #include "structs.h"
 
@@ -36,7 +39,7 @@ void wireHitIntersections(const std::vector<Wire> &wires,
 /// main method. n is the event to look at, or -1 to look at all events
 /// makes some assumptions about directory structure: the dir this is run from has a `hitdumper_tree.root`,
 /// and the dir above this has `WireDumpSBND.txt` and `StripDumpSBND.txt`
-void wires(int n = -1, int bins = 10) {
+void wires(int n = -1, const char *hitdumperFile = "hitdumper_tree.root", bool thread = false, int bins = 10) {
   if (OUTPUT == Output::Draw && n == -1) {
     std::cout << "Cannot draw every event at once (ROOT gets angry)"
               << "\n Try calling wires with a specific (zero-indexed) event number"
@@ -46,7 +49,7 @@ void wires(int n = -1, int bins = 10) {
   }
   // initialize ROOT stuff
   auto *c1 = new TCanvas("c1", "c1"); // to make root not print that this is created
-  auto *file = TFile::Open("hitdumper_tree.root");
+  auto *file = TFile::Open(hitdumperFile);
   auto *hitdumper = (TDirectoryFile *) file->Get("hitdumper");
   hitdumper->cd();
   auto *tree = (TTree *) hitdumper->Get("hitdumpertree");
@@ -83,6 +86,14 @@ void wires(int n = -1, int bins = 10) {
   tree->SetBranchAddress("chit_time", &t);
   tree->SetBranchAddress("nchits", &nchits);
 
+  using namespace std::chrono;
+
+  std::chrono::microseconds makeTracksTime(0);
+  std::chrono::microseconds sortTime(0);
+  std::chrono::microseconds findIntersectsTime(0);
+  std::chrono::microseconds scoreTime(0);
+  std::chrono::microseconds dedupTime(0);
+  std::chrono::microseconds totalTime(0);
 
   // draw crt hits
   auto *chitMarker = new TPolyMarker3D(CHITS);
@@ -101,6 +112,8 @@ void wires(int n = -1, int bins = 10) {
       nwhits = WHITS;
     }
 
+    const auto start = high_resolution_clock::now();
+
     // read CRT/Wire hits from ROOT tree
     std::vector<CRTHit> chits;
     std::vector<WireHit> whits;
@@ -115,6 +128,7 @@ void wires(int n = -1, int bins = 10) {
     for (int j = 0; j < nwhits; ++j) {
       whits.emplace_back(channel[j], cryo[j], tpc[j], plane[j], wire[j], peakT[j]);
     }
+//    std::cout << "nwhits = " << nwhits << std::endl;
 
     // top and mid are the planes above detector, bot is below
     std::vector<CRTHit> top, mid, bot;
@@ -140,7 +154,7 @@ void wires(int n = -1, int bins = 10) {
     // top->mid->bot tracks.
     auto *projPts = new TPolyMarker3D();
     if (!bot.empty()) {
-      for (int j = tracks.size(); j > 0; --j) {
+      for (size_t j = tracks.size(); j > 0; --j) {
         auto track = tracks[0];
         tracks.erase(tracks.begin());
         for (const auto &bhit : bot) {
@@ -187,6 +201,9 @@ void wires(int n = -1, int bins = 10) {
     }
 //    std::cout << "#tracks = " << tracks.size() << std::endl;
 
+    const auto madeTracks = high_resolution_clock::now();
+    makeTracksTime += duration_cast<microseconds>(madeTracks - start);
+
     // Sort by time then by plane (vertical plane first)
     std::sort(whits.begin(), whits.end(), [](const WireHit &a, const WireHit &b) {
       if (a.peakTick < b.peakTick) {
@@ -205,13 +222,20 @@ void wires(int n = -1, int bins = 10) {
       }
     }
 
-    std::vector<TVector3> intersects;
-    wireHitIntersections(wires, tpc0, intersects);
-    wireHitIntersections(wires, tpc1, intersects);
+    const auto sorted = high_resolution_clock::now();
+    sortTime += duration_cast<microseconds>(sorted - madeTracks);
+
+    std::vector<TVector3> intersects0;
+    wireHitIntersections(wires, tpc0, intersects0);
+    std::vector<TVector3> intersects1;
+    wireHitIntersections(wires, tpc1, intersects1);
 //    std::cout << "num intersects = " << intersects.size() << std::endl;
     if constexpr (OUTPUT == Output::Draw) {
       auto *intersectMarks = new TPolyMarker3D();
-      for (const auto &intersect : intersects) {
+      for (const auto &intersect : intersects0) {
+        addPoint(intersectMarks, intersect);
+      }
+      for (const auto &intersect : intersects1) {
         addPoint(intersectMarks, intersect);
       }
       intersectMarks->SetMarkerStyle(kFullDotMedium);
@@ -219,27 +243,36 @@ void wires(int n = -1, int bins = 10) {
       intersectMarks->Draw();
     }
 
+    const IntersectsByHeight<NHeightBins> byHeight0(intersects0);
+    const IntersectsByHeight<NHeightBins> byHeight1(intersects1);
+
+    const auto foundIntersects = high_resolution_clock::now();
+    findIntersectsTime += duration_cast<microseconds>(foundIntersects - sorted);
+
     // score each track: walk down track, project it onto the wire plane, and count nearby wire hits
     hashmap<CRTTrack, double> scores;
     for (const auto &track : tracks) {
       double score = 0;
       int tot = 0;
 
-      hashset<TVector3> usedIntersects;
       auto topmost = track.topmostPt();
       double slopeZ = (topmost.z() - track.zb) / (topmost.y() - track.yb);
       double slopeX = (topmost.x() - track.xb) / (topmost.y() - track.yb);
-      int delta = 1;
+      int delta = 5;
       for (
           TVector3 pt = track.topmostPt();
           pt.Y() > -200; // -200 is the bottom of tcp plane
           pt -= TVector3(slopeX * delta, delta, slopeZ * delta)
           ) {
         if (pt.Y() > 200) continue; // 200 is top of tcp plane
-        for (const auto &intersect : intersects) {
-          if (std::signbit(intersect.X()) != std::signbit(pt.X())) {
-            continue; // ensure intersect and track are at same wire plane
-          }
+//        const std::vector<TVector3> &intersects = std::signbit(pt.x())
+//                                 ? intersects0
+//                                 : intersects1;
+        const IntersectsByHeight<NHeightBins> &byHeight = std::signbit(pt.x())
+                                                          ? byHeight0
+                                                          : byHeight1;
+        const auto[at, near] = byHeight.at_y(pt.y());
+        for (const auto &intersect : at.get()) {
           ++tot;
           auto projected = pt;
           projected.SetX(intersect.x());
@@ -247,7 +280,18 @@ void wires(int n = -1, int bins = 10) {
           int maxDist = 5;
           if (mag < maxDist) {
             ++score;
-            usedIntersects.insert(intersect);
+          }
+        }
+        if (near) {
+          for (const auto &intersect : near->get()) {
+            ++tot;
+            auto projected = pt;
+            projected.SetX(intersect.x());
+            double mag = (projected - intersect).Mag();
+            int maxDist = 5;
+            if (mag < maxDist) {
+              ++score;
+            }
           }
         }
       }
@@ -259,6 +303,18 @@ void wires(int n = -1, int bins = 10) {
       }
 //      std::cout << "score = " << score << "\t\t\t" << track << std::endl;
       scores.emplace(track, score);
+    }
+
+//    std::cout << intersects0.size() + intersects1.size() << " tot intersects" << std::endl;
+
+    const auto scored = high_resolution_clock::now();
+    scoreTime += duration_cast<microseconds>(scored - foundIntersects);
+    if (duration_cast<microseconds>(scored - foundIntersects) > milliseconds(500)) {
+      std::cout << "Took " << duration_cast<microseconds>(scored - foundIntersects).count() << " us" << std::endl;
+      std::cout << chits.size() << " crt hits\n"
+                << whits.size() << " wire hits\n"
+                << intersects0.size() + intersects1.size() << " tot intersects"
+                << std::endl;
     }
 
     // each track to a list of of top/bot/mid points on that track
@@ -327,6 +383,10 @@ void wires(int n = -1, int bins = 10) {
       }
     }
 
+    const auto deduped = high_resolution_clock::now();
+    dedupTime += duration_cast<microseconds>(deduped - scored);
+    totalTime += duration_cast<microseconds>(deduped - start);
+
 //    std::cout << "matches.size() = " << matches.size() << std::endl;
     for (const auto &match : matches) {
       match.draw();
@@ -350,20 +410,27 @@ void wires(int n = -1, int bins = 10) {
 //    std::cout << std::endl;
   } // end of for loop over all events
 
+  std::cout << "totalTime = " << totalTime.count() << std::endl;
+  std::cout << "makeTracksTime = " << makeTracksTime.count() << std::endl;
+  std::cout << "sortTime = " << sortTime.count() << std::endl;
+  std::cout << "findIntersectsTime = " << findIntersectsTime.count() << std::endl;
+  std::cout << "scoreTime = " << scoreTime.count() << std::endl;
+  std::cout << "dedupTime = " << dedupTime.count() << std::endl;
+
   if constexpr (OUTPUT == Output::Draw) {
     chitMarker->SetMarkerStyle(kFullDotMedium);
     chitMarker->SetMarkerColor(kBlue);
     chitMarker->Draw();
   }
 
-  if (OUTPUT == Output::Histogram) {
+  if constexpr (OUTPUT == Output::Histogram) {
     realHist->Draw();
 //    nchitsHist->Draw();
 //    matchesHist->Draw();
   }
 
 //   draw wires
-  for (int i = 0; i < wires.size(); i += 50) {
+  for (size_t i = 0; i < wires.size(); i += 50) {
     wires[i].draw();
   }
 
@@ -376,6 +443,10 @@ void wires(int n = -1, int bins = 10) {
 }
 
 #pragma clang diagnostic pop
+
+void wires(const char *hitdumperFile, bool thread = false, int n = -1) {
+  wires(n, hitdumperFile, thread);
+}
 
 /// coordinate where the three wires intersect
 void wireHitIntersections(

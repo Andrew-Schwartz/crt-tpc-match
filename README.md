@@ -1,10 +1,10 @@
 # crt-tpc-match
 Matches SBND CRT tracks to wire hits in order to determine the ratio of real CRT hits to false CRT hits
 
-The main ROOT macro is `wires.cpp`. In ROOT, run `wires(n)` where n is the event number to look at, or -1 to look at all
- events. This macro assumes that there is a file named `hitdumper_tree.root` in the directory it is run from, and that 
- the directory above that contains `WireDumpSBND.txt` and `StripDumpSBND.txt`. Config variables can be found near the 
- top of the file. 
+The main ROOT macro is `src/wires.cpp`. In ROOT, run `wires(n)` where n is the event number to look at, or -1 to look at
+ all events. This macro assumes that there is a file named `hitdumper_tree.root` in the directory it is run from, and
+ that the directory above that contains `WireDumpSBND.txt` and `StripDumpSBND.txt`. Config variables can be found near 
+ the top of the file. 
  
  `OUTPUT`: controls whether the hits, track, etc are drawn.
 

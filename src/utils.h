@@ -14,8 +14,9 @@ enum class Output {
 // config variables
 constexpr Output OUTPUT = Output::Histogram;
 constexpr bool FLIP = true;
-constexpr size_t CHITS = 100;
-constexpr size_t WHITS = 30000;
+constexpr int CHITS = 100;
+constexpr int WHITS = 30000;
+constexpr size_t NHeightBins = 50;
 
 // detector geometry
 constexpr double ytop = 866.42;
@@ -46,7 +47,7 @@ bool epsEqual(double n1, double n2, double eps = 0.01) {
 template<class T>
 T mean(const std::vector<T> &data) {
   auto sum = data[0];
-  for (int i = 0; i < data.size(); ++i) {
+  for (size_t i = 0; i < data.size(); ++i) {
     sum += data[i];
   }
   // multiplying by reciprocal instead of dividing to support TVector3
@@ -69,7 +70,7 @@ double stddev(const std::vector<TVector3> &pts, const std::optional<TVector3> &o
 }
 
 double stddev(const std::vector<double> &data, const std::optional<double> &omean = std::nullopt) {
-  double sum;
+  double sum = 0;
   auto avg = omean ? *omean : mean(data);
   for (const auto &datum : data) {
     sum += std::pow(datum - avg, 2);
